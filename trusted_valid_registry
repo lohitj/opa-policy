@@ -1,0 +1,51 @@
+package kubernetes.admission
+commonpatches(op, key, value, pathPrefix, path) = patchCode {
+	patchCode = {
+		"op": op,
+		"path": path,
+		"value": value,
+	}
+}
+valid_deployment_registries[host]{
+    whitelist := "docker.io,gcr.io,k8s.gcr.io,quay.io,gbl-ifs-bos-pif-dtr.stage-artifacts.pwc.com,gbl-ifs-bos-pif-dtr.artifacts.pwc.com"
+	hosts := split(whitelist, ",")
+	host := hosts[_]
+}
+
+patch[patchCode] {
+	input.request.kind.kind == "Pod"
+	input.request.object.spec.containers[i]
+    pat := input_containers[container]
+    def := count(pat)-1
+    value := concat("/",["gbl-ifs-bos-pif-dtr.artifacts.pwc.com", pat[def]])
+	path := sprintf("/spec/containers/%v/image", [i])
+       patchCode = commonpatches("replace", "image", value, "",path)
+}
+deny[reason]{
+	contain := input_containers[container]
+	not count(contain)>0
+	reason := "No Valid Image"
+}
+deny[reason] {
+  some container
+  some registry
+  input_containers[container]
+  valid_deployment_registries[registry]
+  not registry_matches_any(container[0], valid_deployment_registries)
+  reason := "container image refers to illegal registry"
+}
+
+input_containers[container] {
+  container := split(input.request.object.spec.containers[_].image, "/")
+}
+
+input_containers[container] {
+  container := split(input.request.object.spec.template.spec.containers[_].image, "/")
+}
+registry_matches_any(str, registry) {
+	registry_matches(str, registry[_])
+}
+
+registry_matches(str, pattern) {
+    str == pattern
+}
